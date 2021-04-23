@@ -1,0 +1,6 @@
+FileVersion = 1
+
+[Project]
+Name = "cli-beef"
+TargetType = "BeefLib"
+StartupObject = "cli_beef.Program"
