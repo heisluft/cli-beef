@@ -46,42 +46,62 @@ namespace cli_beef {
 			return .Err(errOut..Append("Option ")..Append(longName)..Append(" does not exist!"));
 		}
 
-		public Result<void> ParseOptions(StringView[] args) {
+		// Shorthand for ParseOptions with heap allocated string. It is up to the user to delete it in case of an error.
+		public Result<void, String> ParseOptions(StringView[] args) {
+			String s = new String();
+			if(ParseOptions(args, s) == .Err) return .Err(s);
+			delete s;
+			return .Ok;
+		}
+
+		public Result<void> ParseOptions(StringView[] args, String errmsg) {
 			for(int i = 0; i < args.Count; i++) {
-				if(args[i][0] == '-') {
-					if(args[i].Length < 2) { //Short circuit to prevent out of bounds memory access
-						Console.WriteLine($"Ignoring malformed option '-' at {i}");
-						continue;
-					}
-					if(args[i][1] == '-') { //Long options
-						int indexOf = args[i].IndexOf('=');
-						for(Option o in options) if(StringView(args[i], 2, indexOf == -1 ? args[i].Length - 2 : indexOf - 2).Equals(o.longName)) {
-							if(o.hasVal) {
-				 				if(indexOf == -1) {
-									Console.WriteLine($"Option {o.longName} requires an argument but none was given.");
-									return .Err;
-								}
-								o.value = StringView(args[i], indexOf + 1);
-							}
-							o.isSet = true;
-							continue;
-						}
-						Console.WriteLine($"Unknown long option found '{args[i]}'");
-						continue;
-					} // End Long Options
-					for(Option o in options) if(o.shortName == args[i][1]) {
+				if(args[i][0] != '-' || args[i].Length < 2) { //Short circuit
+					Console.WriteLine($"Ignoring malformed option {args[i]} at {i}");
+					continue;
+				}
+
+				if(args[i][1] == '-') { //Long options
+					int indexOf = args[i].IndexOf('=');
+					for(Option o in options) if(StringView(args[i], 2, indexOf == -1 ? args[i].Length - 2 : indexOf - 2).Equals(o.longName)) {
 						if(o.hasVal) {
-							if(i + 1 == args.Count) {
+			 				if(indexOf == -1) {
 								Console.WriteLine($"Option {o.longName} requires an argument but none was given.");
-								return .Err;
+								continue;
 							}
-							o.value = args[++i]; // Increment to prevent double parsing
+							o.value = StringView(args[i], indexOf + 1);
 						}
 						o.isSet = true;
 						continue;
 					}
-					Console.WriteLine($"Unknown short option found '{args[i]}'");
+					Console.WriteLine($"Unknown long option found '{args[i]}'");
 					continue;
+				} // End Long Options
+
+				// (Concatenated) short options: -s "a" -p -d = -psd "a". 
+				bool argConsumed = false; // Only one short option within a concatenated option set can require an argument
+				charLoop: // Needed for control flow as we want to not only break the inner loop but also skip code handling unrecognized options.
+				for(int j = 1; j < args[i].Length; j++) { // Go through all chars after '-'
+					for(Option o in options) {
+						if(o.shortName == args[i][j]) {
+							if(!o.hasVal) {
+								o.isSet = true; 
+								continue charLoop; // Option found, skip rest
+							}
+							if(argConsumed) {
+								if(errmsg != null) errmsg.Append("Concatenating multiple short options requiring arguments is not allowed!");
+								return .Err;
+							}
+							if(i + 1 == args.Count) {
+								Console.WriteLine($"Short option {o.shortName} requires an argument but none was given.");
+								return .Ok; // We are the last arg anyway, so we might as well exit directly;
+							}
+							o.value = args[++i]; // Increment i to avoid parsing argument as an option
+							argConsumed = true;
+							continue charLoop; // Option found, skip rest
+						}
+					}
+					Console.WriteLine($"Unknown short option found '{args[i][j]}'");
 				}
 			}
 			return .Ok;
